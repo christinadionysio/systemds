@@ -192,17 +192,17 @@ class ModalityRandomDataGenerator:
         self.metadata = []
         for i in range(num_instances):
             if modality_type == ModalityType.AUDIO:
-                self.metadata.append(modality_type.create_metadata(
-                    num_features / 10, data[i]
-                ))
+                self.metadata.append(
+                    modality_type.create_metadata(num_features / 10, data[i])
+                )
             elif modality_type == ModalityType.TEXT:
-                self.metadata.append(modality_type.create_metadata(
-                    num_features / 10, data[i]
-                ))
+                self.metadata.append(
+                    modality_type.create_metadata(num_features / 10, data[i])
+                )
             elif modality_type == ModalityType.VIDEO:
-                self.metadata.append(modality_type.create_metadata(
-                    num_features / 30, 10, 0, 0, 1
-                ))
+                self.metadata.append(
+                    modality_type.create_metadata(num_features / 30, 10, 0, 0, 1)
+                )
             elif modality_type == ModalityType.TIMESERIES:
                 self.metadata.append(modality_type.create_metadata(["test"], data[i]))
             else:
