@@ -18,29 +18,34 @@
 # under the License.
 #
 # -------------------------------------------------------------
+from systemds.scuro.representations.alignment import Alignment
+from dataclasses import dataclass
 import numpy as np
+import cv2 as cv
 
 
-def create_timestamps(frequency, sample_length, start_datetime=None):
-    start_time = (
-        start_datetime
-        if start_datetime is not None
-        else np.datetime64("1970-01-01T00:00:00.000000")
-    )
-    time_increment = 1 / frequency
-    time_increments_array = np.arange(sample_length) * np.timedelta64(
-        int(time_increment * 1e6)
-    )
-    timestamps = start_time + time_increments_array
-
-    return timestamps.astype(np.int64)
+@dataclass
+class OrbDescriptor:
+    kp: object
+    desc: object
 
 
-def calculate_new_frequency(new_length, old_length, old_frequency):
-    duration = old_length / old_frequency
-    new_frequency = new_length / duration
-    return new_frequency
+class OrbAlignment(Alignment):
+    def __init__(self):
+        self.orb = cv.ORB_create()
+        self.bfm = cv.BFMatcher(cv.NORM_HAMMING, crossCheck=True)
+        super().__init("OrbAlignment")
 
+    def compute_descriptor(self, segment):
+        return [OrbDescriptor(self.orb.detectAndCompute(segment, None))]
 
-def get_shape(metadata):
-    return len(metadata[0]["data_layout"]["shape"])
+    def compare(self, a, b):
+        if a.desc is None or b.desc is None:
+            return float("inf")
+        matches = bfm.match(a.desc, b.desc)
+        good_matches = [m for m in matches if m.distance < 40]
+
+        if len(good_matches) == 0:
+            return float(inf)
+
+        return np.median([m.distance for m in good_matches])

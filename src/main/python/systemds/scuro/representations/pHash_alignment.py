@@ -18,29 +18,26 @@
 # under the License.
 #
 # -------------------------------------------------------------
+from systemds.scuro.representations.alignment import Alignment
+import cv2 as cv
 import numpy as np
 
 
-def create_timestamps(frequency, sample_length, start_datetime=None):
-    start_time = (
-        start_datetime
-        if start_datetime is not None
-        else np.datetime64("1970-01-01T00:00:00.000000")
-    )
-    time_increment = 1 / frequency
-    time_increments_array = np.arange(sample_length) * np.timedelta64(
-        int(time_increment * 1e6)
-    )
-    timestamps = start_time + time_increments_array
+class PHashAlignment(Alignment):
+    def __init__(self):
+        super().__init__("pHashAlignment")
+        self.hasher = cv.img_hash.PHash_create()
 
-    return timestamps.astype(np.int64)
+    def compute_descriptor(self, segment):
+        if segment.ndim == 3:
+            return [self.hasher.compute(segment)]
+        if segment.ndim == 4:  # For videos
+            descriptors = []
+            for s in segment:
+                frame = (s * 255).astype(np.uint8, copy=True)
+                descriptors.append(self.hasher.compute(frame))
+            return descriptors
+        raise ("PHashAlignment is only implemented for ndim=3 or ndim=4")
 
-
-def calculate_new_frequency(new_length, old_length, old_frequency):
-    duration = old_length / old_frequency
-    new_frequency = new_length / duration
-    return new_frequency
-
-
-def get_shape(metadata):
-    return len(metadata[0]["data_layout"]["shape"])
+    def compare(self, a, b):
+        return self.hasher.compare(a, b)

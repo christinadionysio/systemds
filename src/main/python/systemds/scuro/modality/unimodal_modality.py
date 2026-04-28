@@ -41,7 +41,7 @@ class UnimodalModality(Modality):
         super().__init__(
             data_loader.modality_type,
             Identifier().new_id(),
-            {},
+            [],
             data_loader.data_type,
         )
         self.data_loader = data_loader
@@ -56,10 +56,11 @@ class UnimodalModality(Modality):
     def get_metadata_at_position(self, position: int):
         if self.data_loader.chunk_size:
             return self.metadata[
-                self.data_loader.chunk_size * self.data_loader.next_chunk + position
+                (self.data_loader.next_chunk - 1) * self.data_loader.chunk_size
+                + position
             ]
 
-        return self.metadata[self.dataIndex][position]
+        return self.metadata[position]
 
     def get_stats(self):
         return self.stats
@@ -165,7 +166,7 @@ class UnimodalModality(Modality):
                     ].data.extend(transformed_chunk.data)
                     transformed_modalities_per_representation[
                         representation.name
-                    ].metadata.update(transformed_chunk.metadata)
+                    ].metadata.extend(transformed_chunk.metadata)
                     for d in transformed_chunk.data:
                         original_lengths_per_representation[representation.name].append(
                             d.shape[0]
