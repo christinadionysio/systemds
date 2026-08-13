@@ -338,9 +338,8 @@ class UnimodalOptimizer:
             expanded_dags_with_task_roots,
             [modality],
             self.tasks,
-            self._checkpoint_manager,
-            self.max_num_workers,
-            self.result_path,
+            max_num_workers=self.max_num_workers,
+            result_path=self.result_path,
             enable_checkpointing=self.enable_checkpointing,
         )
         start_time = time.perf_counter()
