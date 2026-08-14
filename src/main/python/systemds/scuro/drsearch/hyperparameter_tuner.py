@@ -334,7 +334,7 @@ class HyperparameterTuner:
         self.wandb_group = wandb_group
         self.wandb_tags = wandb_tags or []
         self._wandb_run = None
-        self
+        self.enable_checkpointing = enable_checkpointing
 
     def get_modalities_by_id(self, modality_ids: List[int]) -> Modality:
         modalities = []
