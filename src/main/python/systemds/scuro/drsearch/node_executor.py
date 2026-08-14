@@ -737,7 +737,8 @@ class NodeExecutor:
         actual_stats: Optional[RepresentationStats],
         measurement: Optional[MemoryMeasurement] = None,
     ):
-        self._memory_usage_checkpoint.increment(node_id)
+        if self.enable_checkpointing:
+            self._memory_usage_checkpoint.increment(node_id)
 
         if measurement is not None:
             peak_bytes = measurement.footprint_bytes
@@ -755,7 +756,7 @@ class NodeExecutor:
                 if est_cpu >= peak_bytes * 2:
                     print(
                         f"Peak bytes: {peak_bytes/1024**3:.2f} GB, Estimated CPU bytes: "
-                        f"{est_cpu/1024**3:.2f} GB, 200% of estimated for node {node_id}: {operation_name}"
+                        f"{est_cpu/1024**3:.2f} GB, >200% of estimated for node {node_id}: {operation_name}"
                     )
             if gpu_peak_bytes is not None and gpu_peak_bytes >= 0:
                 if gpu_peak_bytes > est_gpu:
@@ -766,28 +767,35 @@ class NodeExecutor:
                 if est_gpu > gpu_peak_bytes * 2:
                     print(
                         f"GPU peak bytes: {gpu_peak_bytes/1024**3:.2f} GB, Estimated GPU bytes: "
-                        f"{est_gpu/1024**3:.2f} GB, 200% of estimated for node {node_id}: {operation_name}"
+                        f"{est_gpu/1024**3:.2f} GB, >200% of estimated for node {node_id}: {operation_name}"
                     )
-        self._memory_usage_data[node_id] = {
-            "cpu_peak_bytes": peak_bytes if peak_bytes is not None else -1,
-            "gpu_peak_bytes": gpu_peak_bytes if gpu_peak_bytes is not None else -1,
-            "operation_name": operation_name,
-            "estimated_cpu_bytes": self.scheduler.node_resources[node_id][0],
-            "estimated_gpu_bytes": self.scheduler.node_resources[node_id][1],
-            "shape": shape,
-            "cpu_increment_bytes": measurement.increment_bytes if measurement else -1,
-            "cpu_footprint_bytes": measurement.footprint_bytes if measurement else -1,
-            "input_resident_bytes": (
-                measurement.input_resident_bytes if measurement else -1
-            ),
-            "traced_peak_bytes": measurement.traced_peak_bytes if measurement else -1,
-            "rss_delta_bytes": measurement.rss_delta_bytes if measurement else -1,
-            "num_instances": getattr(actual_stats, "num_instances", None),
-            "output_shape": getattr(actual_stats, "output_shape", None),
-            "dtype": str(getattr(actual_stats, "dtype", None)),
-            "container": str(getattr(actual_stats, "container", None)),
-        }
-        self._memory_usage_checkpoint.checkpoint_if_due(self._memory_usage_data)
+        if self.enable_checkpointing:
+            self._memory_usage_data[node_id] = {
+                "cpu_peak_bytes": peak_bytes if peak_bytes is not None else -1,
+                "gpu_peak_bytes": gpu_peak_bytes if gpu_peak_bytes is not None else -1,
+                "operation_name": operation_name,
+                "estimated_cpu_bytes": self.scheduler.node_resources[node_id][0],
+                "estimated_gpu_bytes": self.scheduler.node_resources[node_id][1],
+                "shape": shape,
+                "cpu_increment_bytes": (
+                    measurement.increment_bytes if measurement else -1
+                ),
+                "cpu_footprint_bytes": (
+                    measurement.footprint_bytes if measurement else -1
+                ),
+                "input_resident_bytes": (
+                    measurement.input_resident_bytes if measurement else -1
+                ),
+                "traced_peak_bytes": (
+                    measurement.traced_peak_bytes if measurement else -1
+                ),
+                "rss_delta_bytes": measurement.rss_delta_bytes if measurement else -1,
+                "num_instances": getattr(actual_stats, "num_instances", None),
+                "output_shape": getattr(actual_stats, "output_shape", None),
+                "dtype": str(getattr(actual_stats, "dtype", None)),
+                "container": str(getattr(actual_stats, "container", None)),
+            }
+            self._memory_usage_checkpoint.checkpoint_if_due(self._memory_usage_data)
 
     def _print_node_stats(
         self,
