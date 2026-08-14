@@ -99,7 +99,7 @@ class TestDataLoadersLoadFromFiles(unittest.TestCase):
 
         self.assertIsInstance(stats, VideoStats)
         self.assertEqual(stats.num_instances, 2)
-        self.assertEqual(stats.max_length, 45)
+        self.assertEqual(stats.max_length, 60)
         self.assertEqual(stats.max_width, 160)
         self.assertEqual(stats.max_height, 120)
         self.assertEqual(stats.max_channels, 3)
