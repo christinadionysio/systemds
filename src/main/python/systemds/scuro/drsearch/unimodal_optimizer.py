@@ -483,7 +483,11 @@ class UnimodalOptimizer:
         )
         current_node_id = rep_node_id
         rep_dag = builder.build(current_node_id)
-        dags.append(rep_dag)
+        requires_dimensionality_reduction = getattr(
+            operator, "requires_dimensionality_reduction", False
+        )
+        if not requires_dimensionality_reduction:
+            dags.append(rep_dag)
 
         dimensionality_reduction_dags = self.add_dimensionality_reduction_operators(
             builder, current_node_id
@@ -560,9 +564,9 @@ class UnimodalOptimizer:
                             )
                         )
 
-        if rep_dag.nodes[-1].operation().output_modality_type in [
-            ModalityType.EMBEDDING
-        ]:
+        if not requires_dimensionality_reduction and rep_dag.nodes[
+            -1
+        ].operation().output_modality_type in [ModalityType.EMBEDDING]:
             dags.extend(
                 self.default_context_operators(
                     modality, builder, leaf_id, rep_dag, True
