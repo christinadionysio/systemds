@@ -25,7 +25,11 @@ from systemds.scuro.representations.representation import RepresentationStats
 from systemds.scuro.representations.unimodal import UnimodalRepresentation
 import torch
 from transformers import AutoTokenizer, AutoModel
-from systemds.scuro.representations.utils import save_embeddings
+from systemds.scuro.representations.utils import (
+    aggregate_chunk_embeddings,
+    pool_transformer_output,
+    save_embeddings,
+)
 from systemds.scuro.modality.type import ModalityType
 from systemds.scuro.drsearch.operator_registry import register_representation
 from systemds.scuro.utils.memory_utility import (
@@ -39,6 +43,8 @@ os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 
 class BertFamily(UnimodalRepresentation):
+    supports_aggregation_pushdown = True
+
     def __init__(
         self,
         representation_name,
@@ -100,18 +106,15 @@ class BertFamily(UnimodalRepresentation):
         if not isinstance(input_stats, RepresentationStats):
             self.stats = RepresentationStats(
                 input_stats.num_instances,
-                (self.max_seq_length, 768),
-                aggregate_dim=(0,),
+                (768,),
+                aggregate_dim=None,
                 dtype=self.data_type,
             )
         else:
             self.stats = RepresentationStats(
                 input_stats.num_instances,
-                (input_stats.output_shape[0], self.max_seq_length, 768),
-                aggregate_dim=(
-                    0,
-                    1,
-                ),
+                (input_stats.output_shape[0], 768),
+                aggregate_dim=(0,),
                 dtype=self.data_type,
             )
         if self.params and "_pushdown_aggregation" in self.params:
@@ -209,20 +212,14 @@ class BertFamily(UnimodalRepresentation):
         if ModalityType.TEXT.has_field(modality.metadata, "text_spans"):
             dataset = TextSpanDataset(modality.data, modality.metadata)
             embeddings = []
-            aggregate_dim = (0, 1)
+            aggregate_dim = None if aggregation is not None else (0,)
             for text in dataset:
                 embedding = self.create_embeddings(
                     text, self.model, tokenizer, aggregation
                 )
-                embeddings.append(
-                    aggregation.execute(embedding)
-                    if aggregation is not None
-                    else embedding
-                )
+                embeddings.append(embedding)
         else:
-            embeddings = self.create_embeddings(
-                modality.data, self.model, tokenizer, aggregation
-            )
+            embeddings = self.create_embeddings(modality.data, self.model, tokenizer)
         if self.output_file is not None:
             save_embeddings(embeddings, self.output_file)
 
@@ -235,30 +232,25 @@ class BertFamily(UnimodalRepresentation):
     def assert_output_stats(self, transformed_modality):
         if self.stats:
             assert len(transformed_modality.data) == self.stats.num_instances
-            if len(self.stats.output_shape) == 3:
+            actual_shape = np.asarray(transformed_modality.data[0]).shape
+            if len(self.stats.output_shape) == 2:
                 assert (
-                    transformed_modality.data[0].shape[0] <= self.stats.output_shape[0]
-                ), f"Output shape: {transformed_modality.data[0].shape}, Expected shape: {self.stats.output_shape}"
+                    actual_shape[0] <= self.stats.output_shape[0]
+                ), f"Output shape: {actual_shape}, Expected shape: {self.stats.output_shape}"
                 assert (
-                    transformed_modality.data[0].shape[1] == self.stats.output_shape[1]
-                ), f"Output shape: {transformed_modality.data[0].shape}, Expected shape: {self.stats.output_shape}"
-                assert (
-                    transformed_modality.data[0].shape[2] == self.stats.output_shape[2]
-                ), f"Output shape: {transformed_modality.data[0].shape}, Expected shape: {self.stats.output_shape}"
+                    actual_shape[1] == self.stats.output_shape[1]
+                ), f"Output shape: {actual_shape}, Expected shape: {self.stats.output_shape}"
             else:
                 assert (
-                    transformed_modality.data[0].shape[0] == self.stats.output_shape[0]
-                ), f"Output shape: {transformed_modality.data[0].shape}, Expected shape: {self.stats.output_shape}"
-                assert (
-                    transformed_modality.data[0].shape[1] == self.stats.output_shape[1]
-                ), f"Output shape: {transformed_modality.data[0].shape}, Expected shape: {self.stats.output_shape}"
+                    actual_shape == self.stats.output_shape
+                ), f"Output shape: {actual_shape}, Expected shape: {self.stats.output_shape}"
 
     def create_embeddings(self, data, model, tokenizer, aggregation=None):
         dataset = TextDataset(data)
         dataloader = DataLoader(
             dataset, batch_size=self.batch_size, shuffle=False, collate_fn=None
         )
-        cls_embeddings = []
+        pooled_batches = []
         for batch in dataloader:
             inputs = tokenizer(
                 batch,
@@ -286,18 +278,26 @@ class BertFamily(UnimodalRepresentation):
             with torch.no_grad():
                 outputs = model(**inputs)
                 if self.layer == "cls":
-                    cls_embedding = outputs.last_hidden_state.detach().cpu().numpy()
+                    hidden_state = outputs.last_hidden_state
                 else:
-                    cls_embedding = self.bert_output.cpu().numpy()
-                if (
-                    aggregation is not None
-                    and self.layer != "pooler"
-                    and self.layer != "pooler.activation"
-                ):
-                    cls_embedding = aggregation.execute(cls_embedding)
-                cls_embeddings.extend(cls_embedding)
+                    hidden_state = self.bert_output
+                pooled = pool_transformer_output(
+                    hidden_state,
+                    inputs["attention_mask"],
+                    use_cls=self.layer == "cls",
+                )
+                pooled_batches.append(pooled.detach())
 
-        return cls_embeddings
+        embeddings = torch.cat(pooled_batches, dim=0)
+        if aggregation is not None:
+            return (
+                aggregate_chunk_embeddings(embeddings, aggregation)
+                .cpu()
+                .float()
+                .numpy()
+            )
+
+        return list(embeddings.cpu().float().numpy())
 
 
 @register_representation(ModalityType.TEXT)

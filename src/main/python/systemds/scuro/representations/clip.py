@@ -26,7 +26,11 @@ from systemds.scuro.modality.transformed import TransformedModality
 from systemds.scuro.representations.representation import RepresentationStats
 from systemds.scuro.representations.unimodal import UnimodalRepresentation
 import torch
-from systemds.scuro.representations.utils import save_embeddings
+from systemds.scuro.representations.utils import (
+    aggregate_chunk_embeddings,
+    pool_transformer_output,
+    save_embeddings,
+)
 from systemds.scuro.modality.type import ModalityType
 from systemds.scuro.drsearch.operator_registry import register_representation
 from transformers import CLIPProcessor, CLIPModel
@@ -336,6 +340,8 @@ class CLIPVisual(UnimodalRepresentation):
 
 @register_representation(ModalityType.TEXT)
 class CLIPText(UnimodalRepresentation):
+    supports_aggregation_pushdown = True
+
     def __init__(self, output_file=None, batch_size=32, layer_name="", params=None):
         if params is not None:
             self.batch_size = int(params.get("batch_size", batch_size))
@@ -400,17 +406,14 @@ class CLIPText(UnimodalRepresentation):
             self.stats = RepresentationStats(
                 input_stats.num_instances,
                 (512,),
-                aggregate_dim=(0,),
+                aggregate_dim=None,
                 dtype=self.data_type,
             )
         else:
             self.stats = RepresentationStats(
                 input_stats.num_instances,
                 (input_stats.output_shape[0], 512),
-                aggregate_dim=(
-                    0,
-                    1,
-                ),
+                aggregate_dim=(0,),
                 dtype=self.data_type,
             )
         if self.params and "_pushdown_aggregation" in self.params:
@@ -499,22 +502,24 @@ class CLIPText(UnimodalRepresentation):
                     layer.register_forward_hook(get_activation(name))
                     break
 
+        aggregate_dim = None
         if ModalityType.TEXT.has_field(modality.metadata, "text_spans"):
             dataset = TextSpanDataset(modality.data, modality.metadata)
             embeddings = []
+            aggregate_dim = None if aggregation is not None else (0,)
             for text_chunks in dataset:
                 embedding = self.create_text_embeddings(
                     text_chunks, self.model, aggregation
                 )
                 embeddings.append(embedding)
         else:
-            embeddings = self.create_text_embeddings(
-                modality.data, self.model, aggregation
-            )
+            embeddings = self.create_text_embeddings(modality.data, self.model)
 
         if self.output_file is not None:
             save_embeddings(embeddings, self.output_file)
 
+        transformed_modality.data_type = np.float32
+        transformed_modality.aggregate_dim = aggregate_dim
         transformed_modality.data = embeddings
         return transformed_modality
 
@@ -523,7 +528,7 @@ class CLIPText(UnimodalRepresentation):
         dataloader = DataLoader(
             dataset, batch_size=self.batch_size, shuffle=False, collate_fn=None
         )
-        embeddings = []
+        pooled_batches = []
         for batch in dataloader:
             inputs = self.processor(
                 text=batch,
@@ -536,16 +541,21 @@ class CLIPText(UnimodalRepresentation):
             with torch.no_grad():
                 if self.layer_name != "":
                     _ = model.text_model(**inputs)
-
-                    batch_np = self.clip_output.cpu().float().numpy()
-                    if batch_np.ndim == 3:
-                        batch_np = batch_np.mean(axis=1)
+                    pooled = pool_transformer_output(
+                        self.clip_output, inputs["attention_mask"]
+                    )
                 else:
-                    batch_np = model.get_text_features(**inputs).cpu().float().numpy()
+                    pooled = model.get_text_features(**inputs)
 
-                if aggregation is not None:
-                    batch_np = aggregation.execute(batch_np)
+                pooled_batches.append(pooled.detach())
 
-                embeddings.extend(batch_np)
+        embeddings = torch.cat(pooled_batches, dim=0)
+        if aggregation is not None:
+            return (
+                aggregate_chunk_embeddings(embeddings, aggregation)
+                .cpu()
+                .float()
+                .numpy()
+            )
 
-        return embeddings
+        return list(embeddings.cpu().float().numpy())
