@@ -519,7 +519,9 @@ class UnimodalOptimizer:
                     operator.get_current_parameters(),
                 )
 
-                agg_operator = AggregatedRepresentation(target_dimensions=1)
+                agg_operator = AggregatedRepresentation(
+                    target_dimensions=1, aggregate_leading=True
+                )
                 context_agg_node_id = builder.create_operation_node(
                     agg_operator.__class__,
                     [context_rep_node_id],
