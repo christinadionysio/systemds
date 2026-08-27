@@ -105,13 +105,15 @@ class UnimodalModality(Modality):
         Uses the data loader to read the raw data from a specified location
         and stores the data in the data location.
         """
-        self.data, self.metadata = self.data_loader.load()
+        data, metadata = self.data_loader.load()
+        self._data = data
+        self.metadata = metadata
 
     def iter_raw_data_chunks(self, reset: bool = True):
         for data, metadata, chunk_indices in self.data_loader.iter_loaded_chunks(
             reset=reset
         ):
-            self.data = data
+            self._data = data
             self.metadata = metadata
             yield chunk_indices
 

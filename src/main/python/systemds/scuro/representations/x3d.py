@@ -35,6 +35,7 @@ from systemds.scuro.representations.representation import RepresentationStats
 from systemds.scuro.representations.unimodal import UnimodalRepresentation
 from systemds.scuro.representations.utils import (
     LengthBucketBatchSampler,
+    get_sequence_lengths,
     inference_context,
     move_batch_to_device,
     pin_memory_for,
@@ -238,7 +239,10 @@ class X3D(UnimodalRepresentation):
                     break
 
         dataset = CustomDataset(modality.data, self.data_type, "cpu")
-        lengths = [max(len(video), 14) for video in modality.data]
+        lengths = [
+            max(length, 14)
+            for length in get_sequence_lengths(modality.data, modality.metadata)
+        ]
         dataloader = torch.utils.data.DataLoader(
             dataset,
             batch_sampler=LengthBucketBatchSampler(
@@ -378,7 +382,7 @@ class I3D(UnimodalRepresentation):
         dataloader = torch.utils.data.DataLoader(
             dataset,
             batch_sampler=LengthBucketBatchSampler(
-                [len(video) for video in modality.data],
+                get_sequence_lengths(modality.data, modality.metadata),
                 self.batch_size,
                 exact=True,
             ),

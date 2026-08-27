@@ -20,6 +20,8 @@
 # -------------------------------------------------------------
 import os
 import pickle
+from bisect import bisect_right
+from collections.abc import Sequence
 from contextlib import contextmanager
 
 import numpy as np
@@ -118,8 +120,59 @@ class OwnedSequenceDataset(torch.utils.data.Dataset):
         return len(self.samples)
 
 
-def flatten_owned_sequences(sequences):
+class FlattenedSequence(Sequence):
+    """Lazy flattened view over per-owner sequences."""
+
+    def __init__(self, sequences, lengths):
+        self.sequences = sequences
+        self.lengths = tuple(int(length) for length in lengths)
+        if len(self.sequences) != len(self.lengths):
+            raise ValueError("Each sequence must have exactly one length")
+
+        self.offsets = [0]
+        for length in self.lengths:
+            self.offsets.append(self.offsets[-1] + length)
+        self._cached_owner = None
+        self._cached_sequence = None
+
+    @property
+    def owner_ids(self):
+        return [
+            owner_id
+            for owner_id, length in enumerate(self.lengths)
+            for _ in range(length)
+        ]
+
+    def __getitem__(self, index):
+        if isinstance(index, slice):
+            return [self[i] for i in range(*index.indices(len(self)))]
+        if index < 0:
+            index += len(self)
+        if index < 0 or index >= len(self):
+            raise IndexError(index)
+
+        owner_id = bisect_right(self.offsets, index) - 1
+        if owner_id != self._cached_owner:
+            self._cached_sequence = self.sequences[owner_id]
+            self._cached_owner = owner_id
+        return self._cached_sequence[index - self.offsets[owner_id]]
+
+    def __len__(self):
+        return self.offsets[-1]
+
+
+def get_sequence_lengths(sequences, metadata):
+    if len(metadata) == len(sequences) and all("length" in md for md in metadata):
+        return [int(md["length"]) for md in metadata]
+    return [len(sequence) for sequence in sequences]
+
+
+def flatten_owned_sequences(sequences, lengths=None):
     """Flatten per-owner sequences while retaining their owner identifiers."""
+    if lengths is not None:
+        samples = FlattenedSequence(sequences, lengths)
+        return samples, samples.owner_ids
+
     samples = []
     owner_ids = []
     for owner_id, owner_samples in enumerate(sequences):

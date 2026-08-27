@@ -20,12 +20,11 @@
 # -------------------------------------------------------------
 from dataclasses import dataclass
 import math
-import os
 from typing import List, Optional, Tuple, Union
 
 import numpy as np
 
-from systemds.scuro.dataloader.base_loader import BaseLoader
+from systemds.scuro.dataloader.base_loader import BaseLoader, LazyFileSequence
 import cv2
 from systemds.scuro.modality.type import ModalityType
 
@@ -81,7 +80,21 @@ class VideoLoader(BaseLoader):
         self.load_data_from_file = load
         self.fps = fps
         self.target_size = tuple(int(v) for v in target_size) if target_size else None
+        self._all_metadata = []
         self.stats = self.get_stats(source_path)
+
+    def load(self):
+        if self.chunk_size:
+            return super().load()
+
+        self.data = LazyFileSequence(
+            self.get_file_names(self.indices), self._decode_data
+        )
+        self.metadata = self._all_metadata.copy()
+        return self.data, self.metadata
+
+    def _decode_data(self, file: str):
+        return self._decode_file(file)[0]
 
     def _frame_interval(self, source_fps: float) -> int:
         if self.fps and source_fps and self.fps < source_fps:
@@ -114,7 +127,7 @@ class VideoLoader(BaseLoader):
         top = (new_h - target_h) // 2
         return frame[top : top + target_h, left : left + target_w]
 
-    def extract(self, file: str, index: Optional[Union[str, List[str]]] = None):
+    def _decode_file(self, file: str):
         self.file_sanity_check(file)
         cap = cv2.VideoCapture(file)
 
@@ -148,14 +161,18 @@ class VideoLoader(BaseLoader):
         data = np.stack(frames)
 
         num_frames, height, width = data.shape[0], data.shape[1], data.shape[2]
-        self.metadata.append(
-            self.modality_type.create_metadata(
-                stored_fps, num_frames, width, height, data.shape[3]
-            )
+        metadata = self.modality_type.create_metadata(
+            stored_fps, num_frames, width, height, data.shape[3]
         )
+        return data, metadata
+
+    def extract(self, file: str, index: Optional[Union[str, List[str]]] = None):
+        data, metadata = self._decode_file(file)
+        self.metadata.append(metadata)
         self.data.append(data)
 
     def get_stats(self, source_path: str):
+        self._all_metadata = []
         self.file_sanity_check(source_path)
         max_length = 0
         max_width = 0
@@ -164,14 +181,12 @@ class VideoLoader(BaseLoader):
         num_instances = 0
         stored_lengths = []
         stored_fps = []
-        wanted = set(self.indices)
 
-        for file in os.listdir(source_path):
-            file_name = file.split(".")[0]
-            if file_name not in wanted:
-                continue
-            self.file_sanity_check(source_path + file)
-            cap = cv2.VideoCapture(source_path + file)
+        for file in self.get_file_names(self.indices):
+            self.file_sanity_check(file)
+            cap = cv2.VideoCapture(file)
+            if not cap.isOpened():
+                raise ValueError(f"Could not read video at path: {file}")
             try:
                 source_length = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
                 source_fps = cap.get(cv2.CAP_PROP_FPS)
@@ -183,6 +198,14 @@ class VideoLoader(BaseLoader):
             length = self._stored_length(source_length, source_fps)
             width, height = self._stored_frame_size(width, height)
             num_channels = 3
+            stored_frequency = (
+                source_fps / self._frame_interval(source_fps) if source_fps else 0
+            )
+            self._all_metadata.append(
+                self.modality_type.create_metadata(
+                    stored_frequency, length, width, height, num_channels
+                )
+            )
 
             max_length = max(max_length, length)
             max_width = max(max_width, width)
@@ -190,7 +213,7 @@ class VideoLoader(BaseLoader):
             max_num_channels = max(max_num_channels, num_channels)
             stored_lengths.append(length)
             if source_fps:
-                stored_fps.append(source_fps / self._frame_interval(source_fps))
+                stored_fps.append(stored_frequency)
             num_instances += 1
 
         num_total_instances = num_instances
@@ -219,7 +242,7 @@ class VideoLoader(BaseLoader):
 
     def estimate_peak_memory_bytes(self) -> dict:
         stats = self.stats
-        n = self.chunk_size if self.chunk_size is not None else stats.num_instances
+        n = self.chunk_size if self.chunk_size is not None else 1
         n = min(n, stats.num_total_instances)
         per_instance = int(np.prod(stats.avg_output_shape))
         itemsize = np.dtype(self._data_type).itemsize

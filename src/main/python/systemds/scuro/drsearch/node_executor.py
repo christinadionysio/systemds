@@ -309,7 +309,7 @@ def _load_leaf_worker(modality: Any) -> Dict[str, Any]:
     data = modality.data
     resident_bytes = 0
     try:
-        resident_bytes = modality.estimate_memory_bytes()
+        resident_bytes = modality.estimate_peak_memory_bytes()["cpu_peak_bytes"]
     except Exception:
         resident_bytes = 0
 

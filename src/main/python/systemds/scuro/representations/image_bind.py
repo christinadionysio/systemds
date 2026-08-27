@@ -250,7 +250,7 @@ class ImageBind(UnimodalRepresentation):
             if modality.modality_type == ModalityType.TEXT:
                 samples = list(TextDataset(modality.data))
             else:
-                samples = list(modality.data)
+                samples = modality.data
             owner_ids = list(range(len(samples)))
             num_owners = len(samples)
 

@@ -24,6 +24,7 @@ from systemds.scuro.representations.representation import RepresentationStats
 from systemds.scuro.representations.utils import (
     OwnerAccumulator,
     flatten_owned_sequences,
+    get_sequence_lengths,
     inference_context,
     move_batch_to_device,
     pin_memory_for,
@@ -237,10 +238,11 @@ class ResNet(UnimodalRepresentation):
 
         is_image = modality.modality_type == ModalityType.IMAGE
         if is_image:
-            samples = list(modality.data)
+            samples = modality.data
             owner_ids = list(range(len(samples)))
         else:
-            samples, owner_ids = flatten_owned_sequences(modality.data)
+            lengths = get_sequence_lengths(modality.data, modality.metadata)
+            samples, owner_ids = flatten_owned_sequences(modality.data, lengths)
 
         dataset = CustomDataset(samples, self.data_type, "cpu")
         dataloader = torch.utils.data.DataLoader(

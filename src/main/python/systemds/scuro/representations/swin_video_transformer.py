@@ -34,6 +34,7 @@ from systemds.scuro.dataloader.video_loader import VideoStats
 from systemds.scuro.representations.utils import (
     LengthBucketBatchSampler,
     OwnerAccumulator,
+    get_sequence_lengths,
     move_batch_to_device,
     pin_memory_for,
     transformer_inference_context,
@@ -158,7 +159,7 @@ class SwinVideoTransformer(UnimodalRepresentation):
                     break
 
         dataset = CustomDataset(modality.data, self.data_type, "cpu")
-        lengths = [len(video) for video in modality.data]
+        lengths = get_sequence_lengths(modality.data, modality.metadata)
         dataloader = torch.utils.data.DataLoader(
             dataset,
             batch_sampler=LengthBucketBatchSampler(

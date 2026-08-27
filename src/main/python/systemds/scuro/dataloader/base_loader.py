@@ -20,10 +20,30 @@
 # -------------------------------------------------------------
 import os
 from abc import ABC, abstractmethod
+from collections.abc import Callable, Sequence
 from typing import Iterator, List, Optional, Tuple, Union
 import math
 
 import numpy as np
+
+
+class LazyFileSequence(Sequence):
+    """List-like file references decoded only when a sample is requested."""
+
+    def __init__(self, file_names: List[str], decoder: Callable[[str], object]):
+        self.file_names = tuple(file_names)
+        self.decoder = decoder
+
+    def __getitem__(self, index):
+        if isinstance(index, slice):
+            return [self[i] for i in range(*index.indices(len(self)))]
+        return self.decoder(self.file_names[index])
+
+    def __len__(self):
+        return len(self.file_names)
+
+    def subset(self, indices):
+        return type(self)([self.file_names[i] for i in indices], self.decoder)
 
 
 class BaseLoader(ABC):
@@ -103,7 +123,7 @@ class BaseLoader(ABC):
             self.reset()
 
         if not self._chunk_size:
-            data, metadata = self._load(self.indices)
+            data, metadata = self.load()
             yield data, metadata, self.indices
             return
 
@@ -132,7 +152,7 @@ class BaseLoader(ABC):
         Loads the next chunk of data
         """
         self.data = []
-        # TODO: Handle metadata correctly
+        self.metadata = []
         next_chunk_indices = self.indices[
             self._next_chunk
             * self._chunk_size : (self._next_chunk + 1)
@@ -161,7 +181,7 @@ class BaseLoader(ABC):
             if self._ext is None:
                 _, self._ext = os.path.splitext(os.listdir(self.source_path)[0])
             for index in self.indices if indices is None else indices:
-                file_names.append(self.source_path + index + self._ext)
+                file_names.append(os.path.join(self.source_path, index + self._ext))
             return file_names
         else:
             return self.source_path
