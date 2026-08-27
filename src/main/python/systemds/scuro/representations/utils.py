@@ -87,7 +87,7 @@ class LengthBucketBatchSampler(torch.utils.data.Sampler):
             while end < len(indices) and self.lengths[indices[end]] == length:
                 end += 1
             batches.extend(
-                indices[offset : offset + self.batch_size]
+                indices[offset : min(offset + self.batch_size, end)]
                 for offset in range(start, end, self.batch_size)
             )
             start = end
