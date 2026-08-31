@@ -181,7 +181,8 @@ jobs:
           flair \
           optuna \
           openface-test \
-          imagebind
+          imagebind \
+          pytorchvideo
          kill $KA 
         cd src/main/python
         python -m unittest discover -s tests/scuro -p 'test_*.py' -v

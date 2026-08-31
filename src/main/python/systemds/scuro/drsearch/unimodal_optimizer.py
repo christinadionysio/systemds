@@ -724,7 +724,9 @@ class UnimodalOptimizer:
                         modality.stats.max_length,
                     )
                     input_stats = self._window_input_stats(modality, effective_length)
-                    for parameter, values in aggregation_instance.parameters.items():
+                    for parameter, values in (
+                        aggregation_instance.parameters or {}
+                    ).items():
                         if not isinstance(values, list):
                             continue
                         accepted = aggregation_instance.filter_parameter_domain(
