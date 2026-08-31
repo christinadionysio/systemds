@@ -180,7 +180,8 @@ jobs:
           scikit-optimize \
           flair \
           optuna \
-          openface-test
+          openface-test \
+          imagebind
          kill $KA 
         cd src/main/python
         python -m unittest discover -s tests/scuro -p 'test_*.py' -v
