@@ -167,7 +167,7 @@ jobs:
         pip install --upgrade pip wheel setuptools
         # Use CUDA 12.1 wheels to avoid slow/source builds
         pip install --extra-index-url https://download.pytorch.org/whl/cu121 \
-          torch==2.4.1 torchvision==0.19.1
+          torch==2.4.1 torchvision==0.19.1 torchaudio==2.4.1
         pip install \
           transformers \
           opencv-python \
