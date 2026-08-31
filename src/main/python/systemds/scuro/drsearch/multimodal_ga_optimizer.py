@@ -22,19 +22,23 @@
 from __future__ import annotations
 
 import copy
-import multiprocessing as mp
 import os
 import pickle
 import random
 import tempfile
+import threading
 import time
 import traceback
-from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, wait
 from dataclasses import dataclass, field
 from itertools import chain
 from typing import Any, Dict, List, Optional, Tuple
 
-from deap import base, creator, tools
+from deap import base, tools
+
+from systemds.scuro.drsearch.modality_shared_memory import (
+    add_shared_memory_candidate,
+    unlink_shm,
+)
 
 from systemds.scuro.drsearch.operator_registry import Registry
 from systemds.scuro.drsearch.representation_dag import (
@@ -42,6 +46,7 @@ from systemds.scuro.drsearch.representation_dag import (
     RepresentationDag,
 )
 from systemds.scuro.drsearch.task import Task
+from systemds.scuro.drsearch.worker_pool import PersistentWorkerPool, create_mp_context
 from systemds.scuro.representations.aggregated_representation import (
     AggregatedRepresentation,
 )
@@ -215,22 +220,21 @@ def _evaluate_genome_body(
     return fitness, payload
 
 
-def _evaluate_dag_worker(
-    dag_bytes: bytes,
-    task_bytes: bytes,
-    modalities_bytes: bytes,
-    objective_specs: List[ObjectiveSpec],
-) -> Tuple[Tuple[float, ...], Optional[Dict[str, Any]], Optional[str]]:
-    try:
-        dag = pickle.loads(dag_bytes)
-        task = pickle.loads(task_bytes)
-        modalities = pickle.loads(modalities_bytes)
-        fitness, payload = _evaluate_genome_body(dag, task, modalities, objective_specs)
-        if fitness is None:
-            fitness = _failure_fitness(objective_specs)
-        return fitness, payload, None
-    except Exception:
-        return _failure_fitness(objective_specs), None, traceback.format_exc()
+def _dispatch_genome_evaluation(payload, _gpu_id):
+    dag, task, modalities, objective_specs = payload
+    fitness, result = _evaluate_genome_body(dag, task, modalities, objective_specs)
+    if fitness is None:
+        fitness = _failure_fitness(objective_specs)
+    return fitness, result
+
+
+_WORKER_DISPATCH = {"genome": _dispatch_genome_evaluation}
+
+
+class _FusionIndividual(list):
+    def __init__(self, values, fitness_type):
+        super().__init__(values)
+        self.fitness = fitness_type()
 
 
 class MultimodalDeapOptimizer:
@@ -258,6 +262,7 @@ class MultimodalDeapOptimizer:
         novelty_breeding: bool = True,
         hall_of_fame_size: int = 5,
         allow_repeated_modalities: bool = False,
+        threads_per_worker: Optional[int] = None,
     ):
         self.modalities = modalities
         self.tasks = tasks
@@ -336,29 +341,43 @@ class MultimodalDeapOptimizer:
         self.elite_size = max(0, min(elite_size, self.population_size - 1))
         self.max_workers = max(1, max_workers)
         self.batch_size = max(1, batch_size or self.max_workers)
+        cpu_count = os.cpu_count() or 1
+        self.threads_per_worker = max(
+            1,
+            (
+                threads_per_worker
+                if threads_per_worker is not None
+                else cpu_count // self.max_workers
+            ),
+        )
         self.early_stopping_patience = early_stopping_patience
         self.early_stopping_min_delta = early_stopping_min_delta
         self.novelty_breeding = novelty_breeding
         self._current_task_name = None
+        self._optimize_lock = threading.Lock()
+        self._worker_pool: Optional[PersistentWorkerPool] = None
+        self._parallel_task_name: Optional[str] = None
+        self._parallel_modalities: Optional[List[Any]] = None
+        self._parallel_shm_names: List[str] = []
 
         desired_weights = tuple(
             1.0 if direction == "max" else -1.0 for _, direction in self.objective_specs
         )
         self._objective_weights = desired_weights
-        existing_weights = getattr(
-            getattr(creator, "FitnessMax", None), "weights", None
+        self._fitness_type = type(
+            f"FusionFitness_{id(self)}", (base.Fitness,), {"weights": desired_weights}
         )
-        if existing_weights != desired_weights:
-            if hasattr(creator, "Individual"):
-                del creator.Individual
-            if hasattr(creator, "FitnessMax"):
-                del creator.FitnessMax
-            creator.create("FitnessMax", base.Fitness, weights=desired_weights)
-            creator.create("Individual", list, fitness=creator.FitnessMax)
-        elif not hasattr(creator, "Individual"):
-            creator.create("Individual", list, fitness=creator.FitnessMax)
 
     def optimize(
+        self,
+    ) -> Dict[str, List[FusionSearchResult]]:
+        with self._optimize_lock:
+            try:
+                return self._optimize()
+            finally:
+                self._shutdown_parallel_runtime()
+
+    def _optimize(
         self,
     ) -> Dict[str, List[FusionSearchResult]]:
         for task in self.tasks:
@@ -369,6 +388,9 @@ class MultimodalDeapOptimizer:
 
             self._eval_counter = 0
             self._search_start = time.perf_counter()
+
+            if self.max_workers > 1:
+                self._start_parallel_runtime(task_name)
 
             population = self._build_initial_population(task_name)
             best_ever = None
@@ -428,10 +450,10 @@ class MultimodalDeapOptimizer:
         return self.optimization_results
 
     def _make_individual(self, genome: DagGenome):
-        return creator.Individual([genome])
+        return _FusionIndividual([genome], self._fitness_type)
 
     def _clone_individual(self, ind):
-        clone = creator.Individual([copy.deepcopy(ind[0])])
+        clone = self._make_individual(copy.deepcopy(ind[0]))
         if ind.fitness.valid:
             clone.fitness.values = ind.fitness.values
         return clone
@@ -536,61 +558,112 @@ class MultimodalDeapOptimizer:
                 fitness = self._evaluate_genome(ind[0], task)
                 ind.fitness.values = fitness
 
+    def _start_parallel_runtime(self, task_name: str) -> None:
+        if self._worker_pool is not None and self._parallel_task_name == task_name:
+            return
+        self._shutdown_parallel_runtime()
+        modalities = list(
+            chain.from_iterable(self.k_best_representations[task_name].values())
+        )
+        shared_modalities = []
+        shm_names = []
+        try:
+            for modality in modalities:
+                shared_modality = copy.copy(modality)
+                resident_bytes = 0
+                try:
+                    resident_bytes = modality.calculate_memory_usage()
+                except Exception:
+                    pass
+                wrapped, shm_name, _, _ = add_shared_memory_candidate(
+                    modality.data, resident_bytes
+                )
+                if wrapped is not None:
+                    shared_modality._data = wrapped
+                    shm_names.append(shm_name)
+                shared_modalities.append(shared_modality)
+            worker_pool = PersistentWorkerPool(
+                self.max_workers,
+                _WORKER_DISPATCH,
+                ctx=create_mp_context(),
+                threads_per_worker=self.threads_per_worker,
+            )
+        except Exception:
+            for shm_name in shm_names:
+                unlink_shm(shm_name)
+            raise
+        self._worker_pool = worker_pool
+        self._parallel_task_name = task_name
+        self._parallel_modalities = shared_modalities
+        self._parallel_shm_names = shm_names
+
+    def _shutdown_parallel_runtime(self) -> None:
+        if self._worker_pool is not None:
+            self._worker_pool.shutdown()
+            self._worker_pool = None
+        self._parallel_task_name = None
+        self._parallel_modalities = None
+        for shm_name in self._parallel_shm_names:
+            unlink_shm(shm_name)
+        self._parallel_shm_names = []
+
     def _evaluate_individuals_parallel(
         self, individuals: List[Any], task: Task
     ) -> None:
         task_name = task.model.name
+        manage_runtime = self._worker_pool is None
+        if manage_runtime:
+            self._start_parallel_runtime(task_name)
         cache = self._fitness_cache.setdefault(task_name, {})
-        ctx = mp.get_context("spawn")
-        task_bytes = pickle.dumps(task)
-        futures: Dict[Any, Tuple[Any, RepresentationDag, Tuple]] = {}
         pending_followers: Dict[Tuple, List[Any]] = {}
+        pending_work = []
+        jobs: Dict[int, Tuple[Any, RepresentationDag, Tuple]] = {}
 
-        def _drain(done_futures):
-            for fut in done_futures:
-                ind, dag, sig = futures.pop(fut)
-                fitness, payload, error = fut.result()
+        for ind in individuals:
+            genome = ind[0]
+            sig = self._genome_signature(genome)
+            cached = cache.get(sig)
+            if cached is not None:
+                ind.fitness.values = cached
+                continue
+            if sig in pending_followers:
+                pending_followers[sig].append(ind)
+                continue
+            dag = self._genome_to_dag(genome)
+            pending_followers[sig] = []
+            pending_work.append((ind, dag, sig))
+
+        try:
+            while pending_work or jobs:
+                while (
+                    pending_work
+                    and self._worker_pool.has_idle_worker
+                    and len(jobs) < self.batch_size
+                ):
+                    ind, dag, sig = pending_work.pop(0)
+                    job_id = self._worker_pool.submit(
+                        "genome",
+                        (dag, task, self._parallel_modalities, self.objective_specs),
+                    )
+                    jobs[job_id] = (ind, dag, sig)
+
+                jr = self._worker_pool.wait()
+                ind, dag, sig = jobs.pop(jr.job_id)
+                if jr.ok:
+                    fitness, payload = jr.value
+                    error = None
+                else:
+                    fitness = _failure_fitness(self.objective_specs)
+                    payload = None
+                    error = jr.error
                 ind.fitness.values = fitness
                 self._record_evaluation(task_name, dag, payload, error)
                 cache[sig] = fitness
                 for follower in pending_followers.pop(sig, []):
                     follower.fitness.values = fitness
-
-        with ProcessPoolExecutor(
-            max_workers=self.max_workers, mp_context=ctx
-        ) as executor:
-            for ind in individuals:
-                genome = ind[0]
-                sig = self._genome_signature(genome)
-                cached = cache.get(sig)
-                if cached is not None:
-                    ind.fitness.values = cached
-                    continue
-                if sig in pending_followers:
-                    pending_followers[sig].append(ind)
-                    continue
-
-                dag = self._genome_to_dag(genome)
-                modalities = list(
-                    chain.from_iterable(self.k_best_representations[task_name].values())
-                )
-                fut = executor.submit(
-                    _evaluate_dag_worker,
-                    pickle.dumps(dag),
-                    task_bytes,
-                    pickle.dumps(modalities),
-                    self.objective_specs,
-                )
-                futures[fut] = (ind, dag, sig)
-                pending_followers[sig] = []
-
-                if len(futures) >= self.batch_size:
-                    done, _ = wait(set(futures.keys()), return_when=FIRST_COMPLETED)
-                    _drain(done)
-
-            if futures:
-                done, _ = wait(set(futures.keys()))
-                _drain(done)
+        finally:
+            if manage_runtime:
+                self._shutdown_parallel_runtime()
 
     def _record_evaluation(
         self,

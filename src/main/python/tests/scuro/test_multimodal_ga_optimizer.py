@@ -107,6 +107,43 @@ def _fake_success_body(_dag, _task, _modalities, _objective_specs, value=0.5):
     }
 
 
+class _SynchronousPool:
+    instances = []
+
+    def __init__(self, n_workers, dispatch, ctx=None, threads_per_worker=1):
+        self.n_workers = n_workers
+        self.dispatch = dispatch
+        self.threads_per_worker = threads_per_worker
+        self.pending = None
+        self.next_job_id = 0
+        self.shutdown_called = False
+        self.instances.append(self)
+
+    @property
+    def has_idle_worker(self):
+        return self.pending is None
+
+    def submit(self, kind, payload, gpu_id=None):
+        job_id = self.next_job_id
+        self.next_job_id += 1
+        try:
+            value = self.dispatch[kind](payload, gpu_id)
+            self.pending = SimpleNamespace(job_id=job_id, ok=True, value=value)
+        except Exception as exc:
+            self.pending = SimpleNamespace(
+                job_id=job_id, ok=False, value=None, error=str(exc)
+            )
+        return job_id
+
+    def wait(self):
+        result = self.pending
+        self.pending = None
+        return result
+
+    def shutdown(self):
+        self.shutdown_called = True
+
+
 def _make_real_representation(modality_id, num_instances, num_features):
     gen = ModalityRandomDataGenerator()
     rep = gen.create1DModality(num_instances, num_features, ModalityType.TIMESERIES)
@@ -896,6 +933,58 @@ class TestRealFusionIntegration(unittest.TestCase):
         self.assertGreater(len(results[task.model.name]), 0)
         self.assertEqual(optimizer.evaluation_errors.get(task.model.name, 0), 0)
 
+    def test_optimize_reuses_one_pool_across_generations(self):
+        optimizer, task = _build_real_optimizer(
+            max_workers=2, batch_size=2, threads_per_worker=3
+        )
+        _SynchronousPool.instances = []
+        with patch(f"{MODULE}.PersistentWorkerPool", _SynchronousPool), patch(
+            f"{MODULE}.create_mp_context", return_value=None
+        ):
+            results = optimizer.optimize()
+
+        self.assertGreater(len(results[task.model.name]), 0)
+        self.assertEqual(len(_SynchronousPool.instances), 1)
+        pool = _SynchronousPool.instances[0]
+        self.assertEqual(pool.threads_per_worker, 3)
+        self.assertTrue(pool.shutdown_called)
+        self.assertIsNone(optimizer._worker_pool)
+
+    def test_parallel_runtime_uses_shared_copies_and_unlinks_them(self):
+        optimizer, task = _build_real_optimizer(max_workers=2, batch_size=2)
+        task_name = task.model.name
+        source_modalities = list(
+            modality
+            for reps in optimizer.k_best_representations[task_name].values()
+            for modality in reps
+        )
+        original_data = [modality.data for modality in source_modalities]
+        wrappers = [object(), object()]
+        shared_results = [
+            (wrappers[0], "shm-0", 1024, 0),
+            (wrappers[1], "shm-1", 1024, 0),
+        ]
+        _SynchronousPool.instances = []
+
+        with patch(
+            f"{MODULE}.add_shared_memory_candidate", side_effect=shared_results
+        ), patch(f"{MODULE}.unlink_shm") as unlink, patch(
+            f"{MODULE}.PersistentWorkerPool", _SynchronousPool
+        ), patch(
+            f"{MODULE}.create_mp_context", return_value=None
+        ):
+            optimizer._start_parallel_runtime(task_name)
+            self.assertEqual(
+                [modality.data for modality in optimizer._parallel_modalities],
+                wrappers,
+            )
+            self.assertEqual([m.data for m in source_modalities], original_data)
+            optimizer._shutdown_parallel_runtime()
+
+        self.assertEqual(
+            [call.args[0] for call in unlink.call_args_list], ["shm-0", "shm-1"]
+        )
+
     def test_parallel_evaluation_dedupes_identical_genomes_in_same_batch(self):
         optimizer, task = _build_real_optimizer(max_workers=2, batch_size=2)
         genome = optimizer._random_genome(task.model.name)
@@ -965,16 +1054,18 @@ class TestMultiObjective(unittest.TestCase):
             _make_optimizer(objectives=[])
 
     def test_is_multi_objective_flag_and_weights(self):
-        optimizer, _, _ = _make_optimizer(
+        multi, _, _ = _make_optimizer(
             objectives=[("accuracy", "max"), ("runtime", "min")]
         )
-        self.assertTrue(optimizer.is_multi_objective)
+        single, _, _ = _make_optimizer()
+        self.assertTrue(multi.is_multi_objective)
         self.assertEqual(
-            optimizer.objective_specs, [("accuracy", "max"), ("runtime", "min")]
+            multi.objective_specs, [("accuracy", "max"), ("runtime", "min")]
         )
-        from deap import creator
-
-        self.assertEqual(creator.FitnessMax.weights, (1.0, -1.0))
+        multi_ind = multi._make_individual(DagGenome([("m0", 0)], 0, {}))
+        single_ind = single._make_individual(DagGenome([("m0", 0)], 0, {}))
+        self.assertEqual(multi_ind.fitness.weights, (1.0, -1.0))
+        self.assertEqual(single_ind.fitness.weights, (1.0,))
 
     def test_single_objective_by_default(self):
         optimizer, _, _ = _make_optimizer()
