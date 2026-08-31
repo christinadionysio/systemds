@@ -31,7 +31,7 @@ import time
 import traceback
 from dataclasses import dataclass, field
 from itertools import chain
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 from deap import base, tools
 
@@ -52,7 +52,7 @@ from systemds.scuro.representations.aggregated_representation import (
 )
 from systemds.scuro.utils.schema_helpers import get_shape
 
-Tree = int | Tuple["Tree", "Tree"]
+Tree = Union[int, Tuple["Tree", "Tree"]]
 
 
 def _collect_internal_paths(tree: Tree, path: str = "") -> List[str]:
