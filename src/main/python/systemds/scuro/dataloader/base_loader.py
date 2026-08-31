@@ -20,8 +20,8 @@
 # -------------------------------------------------------------
 import os
 from abc import ABC, abstractmethod
-from collections.abc import Callable, Sequence
-from typing import Iterator, List, Optional, Tuple, Union
+from collections.abc import Sequence
+from typing import Callable, Iterator, List, Optional, Tuple, Union
 import math
 from numbers import Integral
 
