@@ -23,6 +23,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Callable, Sequence
 from typing import Iterator, List, Optional, Tuple, Union
 import math
+from numbers import Integral
 
 import numpy as np
 
@@ -74,8 +75,7 @@ class BaseLoader(ABC):
         self._data_type = data_type
         self._ext = ext
         self.stats = None
-        if chunk_size:
-            self.chunk_size = chunk_size
+        self.chunk_size = chunk_size
 
     @property
     def chunk_size(self):
@@ -83,8 +83,28 @@ class BaseLoader(ABC):
 
     @chunk_size.setter
     def chunk_size(self, value):
-        self._chunk_size = value
-        self._num_chunks = int(math.ceil(len(self.indices) / self._chunk_size))
+        if value is None:
+            self._chunk_size = None
+            self._num_chunks = 1
+        else:
+            if isinstance(value, bool) or not isinstance(value, Integral) or value <= 0:
+                raise ValueError("chunk_size must be None or a positive integer")
+            self._chunk_size = int(value)
+            self._num_chunks = int(math.ceil(len(self.indices) / self._chunk_size))
+
+        stats = getattr(self, "stats", None)
+        if stats is not None and hasattr(stats, "num_instances"):
+            stats.num_instances = (
+                len(self.indices)
+                if self._chunk_size is None
+                else min(len(self.indices), self._chunk_size)
+            )
+        if stats is not None and hasattr(stats, "num_total_instances"):
+            stats.num_total_instances = len(self.indices)
+
+    @property
+    def is_chunked(self):
+        return self._chunk_size is not None
 
     @property
     def num_chunks(self):
@@ -111,7 +131,7 @@ class BaseLoader(ABC):
         """
         Takes care of loading the raw data either chunk wise (if chunk size is defined) or all at once
         """
-        if self._chunk_size:
+        if self.is_chunked:
             return self._load_next_chunk()
 
         return self._load(self.indices)
@@ -122,7 +142,7 @@ class BaseLoader(ABC):
         if reset:
             self.reset()
 
-        if not self._chunk_size:
+        if not self.is_chunked:
             data, metadata = self.load()
             yield data, metadata, self.indices
             return
@@ -135,17 +155,14 @@ class BaseLoader(ABC):
             yield data, metadata, chunk_indices
 
     def update_chunk_sizes(self, other):
-        if not self._chunk_size and not other.chunk_size:
+        sizes = [
+            size for size in (self.chunk_size, other.chunk_size) if size is not None
+        ]
+        if not sizes:
             return
-
-        if (
-            self._chunk_size
-            and not other.chunk_size
-            or self._chunk_size < other.chunk_size
-        ):
-            other.chunk_size = self.chunk_size
-        else:
-            self.chunk_size = other.chunk_size
+        shared_size = min(sizes)
+        self.chunk_size = shared_size
+        other.chunk_size = shared_size
 
     def _load_next_chunk(self):
         """

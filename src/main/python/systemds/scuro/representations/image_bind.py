@@ -48,6 +48,11 @@ from systemds.scuro.utils.torch_dataset import TextDataset, TextSpanDataset
 @register_representation([ModalityType.VIDEO, ModalityType.AUDIO, ModalityType.TEXT])
 class ImageBind(UnimodalRepresentation):
     _EMBEDDING_DIM = 1024
+    _MODEL_PARAMETER_COUNT = 1_200_000_000
+    _CLIPS_PER_VIDEO = 5
+    _SPATIAL_CROPS = 3
+    _FRAMES_PER_CLIP = 2
+    _CROP_SIZE = 224
     supports_aggregation_pushdown = True
     cache_in_worker = True
 
@@ -86,6 +91,44 @@ class ImageBind(UnimodalRepresentation):
 
     def estimate_output_memory_bytes(self, input_stats) -> int:
         return input_stats.num_instances * self._EMBEDDING_DIM * self.data_type.itemsize
+
+    def estimate_peak_memory_bytes(self, input_stats) -> dict:
+        num_instances = max(getattr(input_stats, "num_instances", 1), 1)
+
+        model_bytes = self._MODEL_PARAMETER_COUNT * self.data_type.itemsize
+
+        clip_bytes = (
+            self._CLIPS_PER_VIDEO
+            * self._SPATIAL_CROPS
+            * self._FRAMES_PER_CLIP
+            * 3
+            * self._CROP_SIZE
+            * self._CROP_SIZE
+            * self.data_type.itemsize
+        )
+        preprocessed_bytes = num_instances * clip_bytes
+
+        batch_activation_bytes = self.batch_size * clip_bytes * 4
+
+        output_bytes = self.estimate_output_memory_bytes(input_stats)
+
+        decoded_bytes = (
+            getattr(input_stats, "max_length", 0)
+            * getattr(input_stats, "max_channels", 3)
+            * getattr(input_stats, "max_height", self._CROP_SIZE)
+            * getattr(input_stats, "max_width", self._CROP_SIZE)
+            * self.data_type.itemsize
+        )
+
+        safety_margin_bytes = 512 * 1024 * 1024
+
+        gpu_peak = (
+            model_bytes + preprocessed_bytes + batch_activation_bytes + output_bytes
+        )
+        cpu_peak = (
+            model_bytes + decoded_bytes + preprocessed_bytes + output_bytes
+        ) + safety_margin_bytes
+        return {"cpu_peak_bytes": int(cpu_peak), "gpu_peak_bytes": int(gpu_peak)}
 
     def _ensure_model(self):
         if self.model is None:

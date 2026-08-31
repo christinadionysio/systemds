@@ -103,13 +103,13 @@ class VGG19(UnimodalRepresentation):
                 "classifier.6",
             ],
         }
+        return parameters
 
     def estimate_output_memory_bytes(self, input_stats: ImageStats) -> int:
         shape = self.get_output_stats(input_stats).output_shape
         return int(
             input_stats.num_instances * np.prod(shape) * np.dtype(np.float32).itemsize
         )
-        return input_stats.num_instances * 4096 * np.dtype(np.float32).itemsize
 
     def get_output_stats(self, input_stats) -> RepresentationStats:
         if self.params and "_pushdown_aggregation" in self.params:
@@ -136,10 +136,12 @@ class VGG19(UnimodalRepresentation):
             * input_stats.max_channels
             * self.data_type.itemsize
         )
-        model = models.vgg19(weights=models.VGG19_Weights.DEFAULT)
-        param_bytes = sum(p.numel() for p in model.parameters())
-        buffer_bytes = sum(b.numel() for b in model.buffers())
-        model_size_bytes = param_bytes * 4 + buffer_bytes * 4
+        model_size_bytes = sum(
+            p.nelement() * p.element_size() for p in self.model.parameters()
+        )
+        model_size_bytes += sum(
+            b.nelement() * b.element_size() for b in self.model.buffers()
+        )
 
         return {
             "cpu_peak_bytes": (

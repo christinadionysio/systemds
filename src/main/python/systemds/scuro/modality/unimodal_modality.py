@@ -157,74 +157,117 @@ class UnimodalModality(Modality):
         if self.data is None:
             raise Exception("Data is None")
 
-    def apply_representations(self, representations, aggregation=None, parallel=False):
+    def apply_representations(
+        self,
+        representations,
+        aggregation=None,
+        parallel=False,
+        representation_keys=None,
+        aggregations=None,
+    ):
         """
         Applies a list of representations to the modality. Specifically, it applies the representations to the modality in a chunked manner.
         :param representations: List of representations to apply
         :return: List of transformed modalities
         """
+        if representation_keys is None:
+            representation_keys = [
+                representation.name for representation in representations
+            ]
+        if len(representation_keys) != len(representations):
+            raise ValueError("representation_keys must match representations")
+        if len(set(representation_keys)) != len(representation_keys):
+            raise ValueError("representation_keys must be unique")
+
+        if aggregations is None:
+            aggregations = [aggregation] * len(representations)
+        if len(aggregations) != len(representations):
+            raise ValueError("aggregations must match representations")
+
+        representation_specs = list(
+            zip(representation_keys, representations, aggregations)
+        )
         transformed_modalities_per_representation = {}
         padding_per_representation = {}
         original_lengths_per_representation = {}
+        failed_representations = {}
 
-        for representation in representations:
-            transformed_modality = TransformedModality(self, representation.name)
+        for representation_key, representation, _ in representation_specs:
+            transformed_modality = TransformedModality(
+                self, representation.name, representation.output_modality_type
+            )
             transformed_modality.data = []
             transformed_modality.metadata = []
-            transformed_modalities_per_representation[representation.name] = (
+            transformed_modalities_per_representation[representation_key] = (
                 transformed_modality
             )
-            padding_per_representation[representation.name] = False
-            original_lengths_per_representation[representation.name] = []
+            padding_per_representation[representation_key] = False
+            original_lengths_per_representation[representation_key] = []
 
         start = (
             time.time()
         )  # TODO: should be repalced in unimodal_representation.transform
-        if self.data_loader.chunk_size:
-            with ThreadPoolExecutor(
-                max_workers=len(representations) if parallel else 1
-            ) as executor:
-                time_s = time.time()
-                for _ in self.iter_raw_data_chunks(reset=True):
-                    representations_futures = {}
-                    for representation in representations:
-                        future = executor.submit(representation.transform, self)
-                        representations_futures[future] = representation.name
-                    for future in as_completed(representations_futures.keys()):
-                        representation_name = representations_futures.get(future)
+        with ThreadPoolExecutor(
+            max_workers=len(representations) if parallel else 1
+        ) as executor:
+            time_s = time.time()
+            for _ in self.iter_raw_data_chunks(reset=True):
+                representations_futures = {}
+                for (
+                    representation_key,
+                    representation,
+                    rep_aggregation,
+                ) in representation_specs:
+                    if representation_key in failed_representations:
+                        continue
+                    future = executor.submit(
+                        representation.transform, self, rep_aggregation
+                    )
+                    representations_futures[future] = representation_key
+                for future in as_completed(representations_futures.keys()):
+                    representation_key = representations_futures.get(future)
+                    try:
                         transformed_chunk = future.result()
-                        transformed_modalities_per_representation[
-                            representation_name
-                        ].data.extend(transformed_chunk.data)
-                        transformed_modalities_per_representation[
-                            representation_name
-                        ].metadata.extend(transformed_chunk.metadata)
-                        for d in transformed_chunk.data:
+                    except Exception as e:
+                        failed_representations[representation_key] = e
+                        continue
+                    transformed_modalities_per_representation[
+                        representation_key
+                    ].data.extend(transformed_chunk.data)
+                    transformed_modalities_per_representation[
+                        representation_key
+                    ].metadata.extend(transformed_chunk.metadata)
+                    for d in transformed_chunk.data:
+                        shape = getattr(d, "shape", ())
+                        if shape:
                             original_lengths_per_representation[
-                                representation_name
-                            ].append(d.shape[0])
+                                representation_key
+                            ].append(int(shape[0]))
+            if self.data_loader.is_chunked:
                 print(f"Time for transforming data chunks: {time.time() - time_s}")
-        else:
-            if not self.has_data():
-                self.extract_raw_data()
-            new_modality = representation.transform(self)
-            transformed_modalities_per_representation[representation.name] = (
-                new_modality
-            )
 
-        for representation in representations:
+        for representation_name in failed_representations:
+            transformed_modalities_per_representation.pop(representation_name, None)
+
+        if representations and not transformed_modalities_per_representation:
+            raise next(iter(failed_representations.values()))
+
+        for representation_key, representation, _ in representation_specs:
+            if representation_key in failed_representations:
+                continue
             self._apply_padding(
-                transformed_modalities_per_representation[representation.name],
-                original_lengths_per_representation[representation.name],
-                padding_per_representation[representation.name],
+                transformed_modalities_per_representation[representation_key],
+                original_lengths_per_representation[representation_key],
+                padding_per_representation[representation_key],
             )
             transformed_modalities_per_representation[
-                representation.name
+                representation_key
             ].transform_time += (time.time() - start)
             transformed_modalities_per_representation[
-                representation.name
+                representation_key
             ].self_contained = representation.self_contained
         gc.collect()
+        self.failed_representations = failed_representations
         return transformed_modalities_per_representation
 
     def apply_representation(self, representation, aggregation=None):
