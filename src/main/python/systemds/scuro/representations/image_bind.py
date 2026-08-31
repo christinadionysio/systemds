@@ -20,11 +20,8 @@
 # -------------------------------------------------------------
 import math
 
-import imagebind.data as data
 import numpy as np
 import torch
-from imagebind.models import imagebind_model
-from imagebind.models.imagebind_model import ModalityType as IBModalityType
 from pytorchvideo import transforms as pv_transforms
 from pytorchvideo.data.clip_sampling import ConstantClipsPerVideoSampler
 import torchaudio
@@ -131,6 +128,15 @@ class ImageBind(UnimodalRepresentation):
         return {"cpu_peak_bytes": int(cpu_peak), "gpu_peak_bytes": int(gpu_peak)}
 
     def _ensure_model(self):
+        global data, imagebind_model, IBModalityType
+        try:
+            import imagebind.data as data
+            from imagebind.models import imagebind_model
+            from imagebind.models.imagebind_model import ModalityType as IBModalityType
+        except ImportError as error:
+            raise ImportError(
+                "ImageBind requires the optional 'imagebind' package"
+            ) from error
         if self.model is None:
             self.model = imagebind_model.imagebind_huge(pretrained=True)
             for param in self.model.parameters():

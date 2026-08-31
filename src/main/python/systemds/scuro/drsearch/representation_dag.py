@@ -730,7 +730,7 @@ def group_dags_by_dependencies(
         return []
 
     unique_dags: List[RepresentationDag] = []
-    seen_signatures: set[Hashable] = set()
+    seen_signatures: Set[Hashable] = set()
 
     for dag in dags:
         dag_sig = dag.compute_full_node_signature(dag.root_node_id)

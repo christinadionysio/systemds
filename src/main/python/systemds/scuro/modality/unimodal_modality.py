@@ -25,6 +25,7 @@ import numpy as np
 from systemds.scuro import ModalityType
 from systemds.scuro.dataloader.base_loader import BaseLoader
 from systemds.scuro.modality.modality import Modality
+from systemds.scuro.modality.type import ModalityType
 from systemds.scuro.modality.joined import JoinedModality
 from systemds.scuro.modality.transformed import TransformedModality
 from systemds.scuro.representations.representation import (
@@ -58,13 +59,27 @@ class UnimodalModality(Modality):
             new_instance.metadata = self.metadata.copy()
         return new_instance
 
-    def get_metadata_at_position(self, position: int):
-        if self.data_loader.chunk_size:
-            return self.metadata[
-                (self.data_loader.next_chunk - 1) * self.data_loader.chunk_size
-                + position
-            ]
+    def subset(self, indices):
+        if self.data_loader.chunk_size is None:
+            return super().subset(indices)
 
+        indices = list(indices)
+        subset_loader = copy.copy(self.data_loader)
+        subset_loader.indices = [self.data_loader.indices[i] for i in indices]
+        subset_loader.stats = copy.copy(self.data_loader.stats)
+        if hasattr(subset_loader.stats, "num_instances"):
+            subset_loader.stats.num_instances = len(indices)
+        subset_loader.reset()
+        # Re-run the setter after replacing indices so num_chunks reflects the
+        # subset rather than the original dataset.
+        subset_loader.chunk_size = self.data_loader.chunk_size
+
+        subset_modality = type(self)(subset_loader)
+        subset_modality.modality_id = self.modality_id
+        subset_modality.transform_time = self.transform_time
+        return subset_modality
+
+    def get_metadata_at_position(self, position: int):
         return self.metadata[position]
 
     def get_stats(self):

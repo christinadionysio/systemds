@@ -26,7 +26,7 @@ from typing import Any, Dict, List, Optional, Union
 
 import torch
 
-from systemds.scuro import Modality
+from systemds.scuro.modality.modality import Modality
 from systemds.scuro.drsearch.modality_result_cache import RefCountResultCache
 from systemds.scuro.drsearch.modality_shared_memory import (
     add_shared_memory_candidate,

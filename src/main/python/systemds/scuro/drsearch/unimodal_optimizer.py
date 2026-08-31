@@ -69,6 +69,7 @@ class UnimodalOptimizer:
         window_combination_chains: int = 1,
     ):
         self._node_stats: Dict[str, Any] = {}
+        self.pruned = []
         self.window_combination_chains = window_combination_chains
         self.enable_checkpointing = enable_checkpointing
         self.modalities = modalities
@@ -701,12 +702,55 @@ class UnimodalOptimizer:
                 modality.modality_type, modality.stats
             )
         )
+        if not window_lengths:
+            for context_operator in context_operators:
+                self.pruned.append(
+                    {
+                        "operation": context_operator.__name__,
+                        "reason": ("no configured window length fits the input signal"),
+                    }
+                )
+            return []
         dags = []
         for context_operator in context_operators:
             for window_size, num_window in zip(window_lengths, num_windows):
                 window_node_ids = []
                 for agg in aggregators:
-                    context_operator_instance = context_operator(agg())
+                    aggregation_instance = agg()
+                    effective_length = self._effective_window_length(
+                        context_operator(),
+                        window_size,
+                        num_window,
+                        modality.stats.max_length,
+                    )
+                    input_stats = self._window_input_stats(modality, effective_length)
+                    for parameter, values in aggregation_instance.parameters.items():
+                        if not isinstance(values, list):
+                            continue
+                        accepted = aggregation_instance.filter_parameter_domain(
+                            parameter, values, input_stats
+                        )
+                        for value in values:
+                            if value not in accepted:
+                                self.pruned.append(
+                                    {
+                                        "operation": aggregation_instance.name,
+                                        "window_length": effective_length,
+                                        "parameters": {parameter: value},
+                                        "reason": "outside the valid input domain",
+                                    }
+                                )
+                    failure = aggregation_instance.check_preconditions(input_stats)
+                    if failure is not None:
+                        self.pruned.append(
+                            {
+                                "operation": aggregation_instance.name,
+                                "window_length": effective_length,
+                                "reason": failure,
+                            }
+                        )
+                        continue
+                    context_operator_instance = context_operator(aggregation_instance)
                     self._apply_granularity(
                         context_operator_instance, window_size, num_window
                     )

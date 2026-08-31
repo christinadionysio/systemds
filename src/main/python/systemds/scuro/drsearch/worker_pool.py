@@ -24,7 +24,7 @@ import multiprocessing.connection as mp_connection
 import os
 import signal
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import torch
 
@@ -261,7 +261,7 @@ class PersistentWorkerPool:
 
     def _take_worker(
         self, gpu_id: Optional[int], allow_gpu_worker_for_cpu: bool
-    ) -> tuple[int, Optional[int]]:
+    ) -> Tuple[int, Optional[int]]:
         if gpu_id is not None:
             gpu_idle = self._idle_gpu_pids.get(gpu_id, [])
             if gpu_idle:
