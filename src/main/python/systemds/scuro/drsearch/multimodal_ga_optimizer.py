@@ -176,6 +176,13 @@ def _failure_fitness(objective_specs: List[ObjectiveSpec]) -> Tuple[float, ...]:
     )
 
 
+def _fold_scores(performance_measure) -> Dict[str, List[float]]:
+    return {
+        metric: [float(value) for value in values]
+        for metric, values in performance_measure.scores.items()
+    }
+
+
 def _evaluate_genome_body(
     dag: RepresentationDag,
     task: Task,
@@ -211,9 +218,9 @@ def _evaluate_genome_body(
         "train_score": scores[0].average_scores,
         "val_score": val_score,
         "test_score": scores[2].average_scores,
-        "train_fold_scores": scores[0].fold_scores(),
-        "val_fold_scores": scores[1].fold_scores(),
-        "test_fold_scores": scores[2].fold_scores(),
+        "train_fold_scores": _fold_scores(scores[0]),
+        "val_fold_scores": _fold_scores(scores[1]),
+        "test_fold_scores": _fold_scores(scores[2]),
         "task_timing": getattr(task, "last_run_timing", {}),
         **timing,
     }
