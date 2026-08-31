@@ -18,6 +18,7 @@
 # under the License.
 #
 # -------------------------------------------------------------
+import copy
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import gc
 import time
