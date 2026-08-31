@@ -28,7 +28,7 @@ from systemds.scuro.modality.modality import Modality
 
 def get_peak_memory_from_dag_group(
     dag_group: List[RepresentationDag], modality: Modality
-) -> tuple[float, float]:
+) -> Tuple[float, float]:
     peak_memory_cpu = 0.0
     peak_memory_gpu = 0.0
     leaf_memory_bytes = modality.estimate_peak_memory_bytes()["cpu_peak_bytes"]

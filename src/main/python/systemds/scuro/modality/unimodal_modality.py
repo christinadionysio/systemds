@@ -22,7 +22,6 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import gc
 import time
 import numpy as np
-from systemds.scuro import ModalityType
 from systemds.scuro.dataloader.base_loader import BaseLoader
 from systemds.scuro.modality.modality import Modality
 from systemds.scuro.modality.type import ModalityType
