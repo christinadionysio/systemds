@@ -53,7 +53,8 @@ class Wav2Vec(UnimodalRepresentation):
     MODEL_NAME = "facebook/wav2vec2-base-960h"
 
     def __init__(self, batch_size=8, params=None):
-        parameters = {"batch_size": [1, 2, 4, 8, 16, 32, 64]}
+        # parameters = {"batch_size": [1, 2, 4, 8, 16, 32, 64]}
+        parameters = {}
         super().__init__("Wav2Vec", ModalityType.TIMESERIES, parameters)
         self.batch_size = int((params or {}).get("batch_size", batch_size))
         self._processor = None

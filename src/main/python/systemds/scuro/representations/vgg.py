@@ -70,7 +70,7 @@ class VGG19(UnimodalRepresentation):
         super().__init__("VGG19", ModalityType.EMBEDDING, parameters)
         self.params = params
         if params is not None:
-            batch_size = int(params.get("batch_size", batch_size))
+            batch_size = int((params or {}).get("batch_size", batch_size))
             layer = params.get("layer_name", layer)
         self.output_file = output_file
         self.layer_name = layer
@@ -95,7 +95,7 @@ class VGG19(UnimodalRepresentation):
 
     def _get_parameters(self):
         parameters = {
-            "batch_size": [1, 2, 4, 8, 16, 32, 64, 128],
+            # "batch_size": [1, 2, 4, 8, 16, 32, 64, 128],
             "layer_name": [
                 "features.35",
                 "classifier.0",

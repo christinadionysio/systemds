@@ -67,7 +67,7 @@ class ResNet(UnimodalRepresentation):
         self.gpu_id = None
         self.device = get_device()
         if params is not None:
-            self.batch_size = int(params.get("batch_size", batch_size))
+            self.batch_size = int((params or {}).get("batch_size", batch_size))
             self.layer_name = params.get("layer_name", layer_name)
             model_name = params.get("model_name", model_name)
         else:
@@ -192,7 +192,7 @@ class ResNet(UnimodalRepresentation):
 
     def _get_parameters(self, high_level=True):
         parameters = {
-            "batch_size": [1, 2, 4, 8, 16, 32, 64, 128],
+            # "batch_size": [1, 2, 4, 8, 16, 32, 64, 128],
             "model_name": [],
             "layer_name": [],
         }

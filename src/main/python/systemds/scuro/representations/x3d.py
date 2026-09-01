@@ -167,7 +167,7 @@ class X3D(UnimodalRepresentation):
 
     def _get_parameters(self, high_level=True):
         parameters = {
-            "batch_size": [1, 2, 4, 8, 16, 32],
+            "batch_size": [8],
             "model_name": [],
             "layer_name": [],
         }
@@ -338,7 +338,7 @@ class I3D(UnimodalRepresentation):
 
     def _get_parameters(self, high_level=True):
         parameters = {
-            "batch_size": [1, 2, 4, 8, 16, 32],
+            "batch_size": [8],
             "layer_name": [],
         }
 

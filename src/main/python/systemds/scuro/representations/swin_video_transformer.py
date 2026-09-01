@@ -64,7 +64,7 @@ class SwinVideoTransformer(UnimodalRepresentation):
                 "features.6",
                 "avgpool",
             ],
-            "batch_size": [1, 2, 4, 8, 16, 32],
+            # "batch_size": [1, 2, 4, 8, 16, 32],
         }
         self.data_type = torch.float32
         super().__init__("SwinVideoTransformer", ModalityType.EMBEDDING, parameters)

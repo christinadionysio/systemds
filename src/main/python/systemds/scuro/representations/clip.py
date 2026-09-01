@@ -71,7 +71,7 @@ class CLIPVisual(UnimodalRepresentation):
         self.model = CLIPModel.from_pretrained("openai/clip-vit-base-patch32")
         self.processor = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32")
         if params is not None:
-            self.batch_size = int(params.get("batch_size", batch_size))
+            self.batch_size = int((params or {}).get("batch_size", batch_size))
             self.layer_name = params.get("layer_name", layer_name)
         else:
             self.batch_size = batch_size
@@ -93,7 +93,7 @@ class CLIPVisual(UnimodalRepresentation):
 
     def _get_parameters(self):
         parameters = {
-            "batch_size": [1, 2, 4, 8, 16, 32, 64, 128],
+            # "batch_size": [1, 2, 4, 8, 16, 32, 64, 128],
             "layer_name": [
                 "",
                 "encoder.layers.0.layer_norm2",
@@ -345,7 +345,7 @@ class CLIPText(UnimodalRepresentation):
 
     def __init__(self, output_file=None, batch_size=32, layer_name="", params=None):
         if params is not None:
-            self.batch_size = int(params.get("batch_size", batch_size))
+            self.batch_size = int((params or {}).get("batch_size", batch_size))
             self.layer_name = params.get("layer_name", layer_name)
         else:
             self.batch_size = batch_size

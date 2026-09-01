@@ -54,13 +54,14 @@ class ImageBind(UnimodalRepresentation):
     cache_in_worker = True
 
     def __init__(self, output_file=None, batch_size=8, params=None):
-        parameters = {"batch_size": [1, 2, 4, 8, 16, 32]}
+        # parameters = {"batch_size": [1, 2, 4, 8, 16, 32]}
+        parameters = {}
         super().__init__("ImageBind", ModalityType.EMBEDDING, parameters)
         self.params = params
         self.output_file = output_file
         self.batch_size = batch_size
         if params is not None:
-            self.batch_size = int(params.get("batch_size", batch_size))
+            batch_size = int((params or {}).get("batch_size", batch_size))
             self.output_file = params.get("output_file", output_file)
         self.data_type = torch.float32
         self.model = None
