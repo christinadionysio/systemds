@@ -27,7 +27,10 @@ from pytorchvideo.data.clip_sampling import ConstantClipsPerVideoSampler
 import torchaudio
 from torchvision import transforms
 
-from systemds.scuro.drsearch.operator_registry import register_representation
+from systemds.scuro.drsearch.operator_registry import (
+    register_representation,
+    register_expensive_representation,
+)
 from systemds.scuro.modality.transformed import TransformedModality
 from systemds.scuro.modality.type import ModalityType
 from systemds.scuro.representations.representation import RepresentationStats
@@ -43,6 +46,9 @@ from systemds.scuro.utils.torch_dataset import TextDataset, TextSpanDataset
 
 
 @register_representation([ModalityType.VIDEO, ModalityType.AUDIO, ModalityType.TEXT])
+@register_expensive_representation(
+    [ModalityType.VIDEO, ModalityType.AUDIO, ModalityType.TEXT]
+)
 class ImageBind(UnimodalRepresentation):
     _EMBEDDING_DIM = 1024
     _MODEL_PARAMETER_COUNT = 1_200_000_000

@@ -24,7 +24,10 @@ from systemds.scuro.modality.transformed import TransformedModality
 from systemds.scuro.dataloader.video_loader import VideoStats
 from systemds.scuro.representations.unimodal import UnimodalRepresentation
 from typing import Tuple, Any
-from systemds.scuro.drsearch.operator_registry import register_representation
+from systemds.scuro.drsearch.operator_registry import (
+    register_representation,
+    register_expensive_representation,
+)
 import torch.utils.data
 import torch
 import torchvision.models as models
@@ -51,6 +54,7 @@ class Identity(torch.nn.Module):
 
 
 @register_representation([ModalityType.IMAGE, ModalityType.VIDEO])
+@register_expensive_representation([ModalityType.IMAGE, ModalityType.VIDEO])
 class VGG19(UnimodalRepresentation):
     supports_aggregation_pushdown = True
     cache_in_worker = True

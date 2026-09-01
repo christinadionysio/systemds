@@ -24,7 +24,10 @@ from types import SimpleNamespace
 import numpy as np
 from systemds.scuro.drsearch.hyperparameter_tuner import (
     HyperparameterTuner,
-    _is_expensive_representation,
+)
+from systemds.scuro.drsearch.operator_registry import (
+    is_expensive_representation,
+    register_expensive_representation,
 )
 from systemds.scuro.drsearch.process_cache import BoundedProcessCache
 from systemds.scuro.drsearch.representation_dag import RepresentationDAGBuilder
@@ -37,6 +40,7 @@ from systemds.scuro.representations.unimodal import UnimodalRepresentation
 from tests.scuro.data_generator import TestDataLoader
 
 
+@register_expensive_representation(ModalityType.TEXT)
 class CountingEncoder(UnimodalRepresentation):
     calls = 0
 
@@ -104,8 +108,8 @@ class TestHPOCache(unittest.TestCase):
         self.assertEqual(cache.get("third"), 3)
 
     def test_default_policy_only_selects_expensive_representations(self):
-        self.assertTrue(_is_expensive_representation(Bert))
-        self.assertFalse(_is_expensive_representation(ScalingRepresentation))
+        self.assertTrue(is_expensive_representation(Bert))
+        self.assertFalse(is_expensive_representation(ScalingRepresentation))
 
     def test_hpo_reuses_unchanged_dag_prefix(self):
         data = ["one", "three"]
@@ -131,7 +135,6 @@ class TestHPOCache(unittest.TestCase):
             [task],
             _OptimizationResults(),
             n_jobs=1,
-            cacheable_representations=[CountingEncoder],
         )
 
         for scale in (1, 2, 3, 1):

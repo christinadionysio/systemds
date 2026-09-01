@@ -39,10 +39,12 @@ from systemds.scuro.representations.utils import (
     transformer_inference_context,
 )
 from systemds.scuro.modality.type import ModalityType
-from systemds.scuro.drsearch.operator_registry import register_representation
+from systemds.scuro.drsearch.operator_registry import (
+    register_representation,
+    register_expensive_representation,
+)
 from transformers import CLIPProcessor, CLIPModel
 
-from systemds.scuro.utils.converter import numpy_dtype_to_torch_dtype
 from systemds.scuro.utils.static_variables import get_device
 from systemds.scuro.utils.torch_dataset import (
     CustomDataset,
@@ -59,6 +61,7 @@ from torch.utils.data import DataLoader
 
 
 @register_representation([ModalityType.VIDEO, ModalityType.IMAGE])
+@register_expensive_representation([ModalityType.VIDEO, ModalityType.IMAGE])
 class CLIPVisual(UnimodalRepresentation):
     supports_aggregation_pushdown = True
     cache_in_worker = True
@@ -339,6 +342,7 @@ class CLIPVisual(UnimodalRepresentation):
 
 
 @register_representation(ModalityType.TEXT)
+@register_expensive_representation(ModalityType.TEXT)
 class CLIPText(UnimodalRepresentation):
     supports_aggregation_pushdown = True
     cache_in_worker = True

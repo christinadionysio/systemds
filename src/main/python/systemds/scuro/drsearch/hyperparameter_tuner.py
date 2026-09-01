@@ -39,32 +39,7 @@ from systemds.scuro.drsearch.task import PerformanceMeasure
 import pickle
 from systemds.scuro.utils.checkpointing import CheckpointManager
 from systemds.scuro.drsearch.process_cache import HPOExecutionCache
-
-_EXPENSIVE_REPRESENTATION_BASES = frozenset(
-    {
-        "systemds.scuro.representations.bert.BertFamily",
-        "systemds.scuro.representations.clip.CLIPText",
-        "systemds.scuro.representations.clip.CLIPVisual",
-        "systemds.scuro.representations.elmo.ELMoRepresentation",
-        "systemds.scuro.representations.glove.GloVe",
-        "systemds.scuro.representations.image_bind.ImageBind",
-        "systemds.scuro.representations.openface.OpenFace",
-        "systemds.scuro.representations.resnet.ResNet",
-        "systemds.scuro.representations.swin_video_transformer.SwinVideoTransformer",
-        "systemds.scuro.representations.vgg.VGG19",
-        "systemds.scuro.representations.wav2vec.Wav2Vec",
-        "systemds.scuro.representations.word2vec.W2V",
-        "systemds.scuro.representations.x3d.I3D",
-        "systemds.scuro.representations.x3d.X3D",
-    }
-)
-
-
-def _is_expensive_representation(operation: Any) -> bool:
-    return any(
-        f"{cls.__module__}.{cls.__qualname__}" in _EXPENSIVE_REPRESENTATION_BASES
-        for cls in inspect.getmro(operation)
-    )
+from systemds.scuro.drsearch.operator_registry import is_expensive_representation
 
 
 def _wandb_safe_tag(s: str, max_len: int = 64) -> str:
@@ -347,7 +322,6 @@ class HyperparameterTuner:
         wandb_tags: Optional[List[str]] = None,
         enable_checkpointing: bool = False,
         representation_cache_size: int = 128,
-        cacheable_representations: Optional[List[type]] = None,
     ):
         self.tasks = tasks
         self.unimodal_optimization_results = optimization_results
@@ -385,23 +359,14 @@ class HyperparameterTuner:
         self.wandb_tags = wandb_tags or []
         self._wandb_run = None
         self.enable_checkpointing = enable_checkpointing
-        self._cacheable_representations = (
-            tuple(cacheable_representations)
-            if cacheable_representations is not None
-            else None
-        )
+
         self.execution_cache = HPOExecutionCache(
             representation_entries=representation_cache_size,
             should_cache_representation=self._should_cache_representation,
         )
 
     def _should_cache_representation(self, operation: Any) -> bool:
-        if self._cacheable_representations is None:
-            return _is_expensive_representation(operation)
-        return any(
-            issubclass(operation, representation)
-            for representation in self._cacheable_representations
-        )
+        return is_expensive_representation(operation)
 
     def get_modalities_by_id(self, modality_ids: List[int]) -> Modality:
         modalities = []

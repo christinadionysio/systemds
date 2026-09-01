@@ -37,7 +37,10 @@ from systemds.scuro.representations.utils import (
     transformer_inference_context,
 )
 from systemds.scuro.modality.type import ModalityType
-from systemds.scuro.drsearch.operator_registry import register_representation
+from systemds.scuro.drsearch.operator_registry import (
+    register_representation,
+    register_expensive_representation,
+)
 from systemds.scuro.utils.memory_utility import (
     get_device,
 )
@@ -349,6 +352,7 @@ class BertFamily(UnimodalRepresentation):
 
 
 @register_representation(ModalityType.TEXT)
+@register_expensive_representation(ModalityType.TEXT)
 class Bert(BertFamily):
     def __init__(
         self,
@@ -393,6 +397,7 @@ class Bert(BertFamily):
 
 
 @register_representation(ModalityType.TEXT)
+@register_expensive_representation(ModalityType.TEXT)
 class RoBERTa(BertFamily):
     def __init__(
         self,
