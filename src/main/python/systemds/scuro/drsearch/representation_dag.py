@@ -375,7 +375,6 @@ class RepresentationDag:
 
             def run_operation():
                 node_operation = node.operation(params=node.parameters)
-                node_operation._execution_cache = execution_cache
                 if gpu_id is not None and hasattr(node_operation, "gpu_id"):
                     node_operation.gpu_id = gpu_id
                 if len(input_mods) == 1:
@@ -410,7 +409,7 @@ class RepresentationDag:
 
             if execution_cache is not None and is_unimodal:
                 result = execution_cache.get_or_compute_representation(
-                    execution_key(node_id), run_operation
+                    node.operation, execution_key(node_id), run_operation
                 )
             else:
                 result = run_operation()

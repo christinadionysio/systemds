@@ -22,7 +22,7 @@ import hashlib
 import os
 import threading
 from collections import OrderedDict
-from typing import Any, Callable, Hashable, Tuple
+from typing import Any, Callable, Hashable, Optional, Tuple
 
 import numpy as np
 
@@ -170,9 +170,13 @@ class BoundedProcessCache:
 
 
 class HPOExecutionCache:
-    def __init__(self, representation_entries: int = 128, token_entries: int = 32):
+    def __init__(
+        self,
+        representation_entries: int = 128,
+        should_cache_representation: Optional[Callable[[Any], bool]] = None,
+    ):
         self.representations = BoundedProcessCache(representation_entries)
-        self.tokens = BoundedProcessCache(token_entries)
+        self.should_cache_representation = should_cache_representation
         self._modality_keys = {}
         self._lock = threading.RLock()
 
@@ -239,14 +243,15 @@ class HPOExecutionCache:
             tuple(input_keys),
         )
 
-    def get_or_compute_representation(self, key, compute):
+    def get_or_compute_representation(self, operation, key, compute):
+        if (
+            self.should_cache_representation is not None
+            and not self.should_cache_representation(operation)
+        ):
+            return compute()
         return self.representations.get_or_compute(key, compute)
-
-    def get_or_compute_tokens(self, key, compute):
-        return self.tokens.get_or_compute(key, compute)
 
     def clear(self) -> None:
         self.representations.clear()
-        self.tokens.clear()
         with self._lock:
             self._modality_keys.clear()
